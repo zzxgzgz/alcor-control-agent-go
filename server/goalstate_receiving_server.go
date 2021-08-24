@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
+	"io"
 	"time"
 )
 
@@ -18,7 +19,26 @@ func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Conte
 func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.GoalStateProvisioner_PushGoalStatesStreamServer) error{
 
 	fmt.Println("Called PushGoalStatesStream")
-
+	for{
+		gsv2_ptr, err := stream_server.Recv()
+		if err == io.EOF{
+			fmt.Println("End of stream, getting out")
+			break
+		}
+		if err != nil {
+			fmt.Printf("Got this error when reading from stream: %v\n", err)
+		}
+		// use this following go routine to simulate using another thread to program goalstatev2, and reply
+		go func() {
+			reply := schema.GoalStateOperationReply{
+				FormatVersion:             (*gsv2_ptr).FormatVersion,
+				OperationStatuses:         nil,
+				MessageTotalOperationTime: 30,
+			}
+			time.Sleep(time.Millisecond * 30)
+			stream_server.Send(&reply)
+		}()
+	}
 	return  nil
 }
 

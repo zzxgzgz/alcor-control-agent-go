@@ -6,6 +6,7 @@ import (
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
 	"github.com/zzxgzgz/alcor-control-agent-go/server"
 	"google.golang.org/grpc"
+	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -137,8 +138,44 @@ func runClient(server_ip string, number_of_calls int){
 	waitGroup.Wait()
 	end := time.Now()
 	diff := end.Sub(begin)
-	fmt.Println("Finishing ", number_of_calls, " calls took ",diff.Milliseconds(), " ms")
-	//for a:= 0 ; a < number_of_calls ; a ++{
-	//	fmt.Println((<-results).OperationStatuses[0].RequestId, " result")
-	//}
+	fmt.Println("Finishing ", number_of_calls, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
+
+
+	fmt.Println("Time to call the same amount of PushGoalStates streaming calls")
+	stream, err := c.PushGoalStatesStream(context.Background())
+	waitc := make(chan struct{})
+	go func(){
+		for {
+			in, err := stream.Recv()
+			if err == io.EOF{
+				close(waitc)
+				fmt.Println("Returning because the stream received io.EOF")
+				return
+			}
+			if err != nil {
+				fmt.Printf("Failed to receive a goalstate programming result: %v\n", err)
+			}
+			fmt.Printf("Received a goalstate operation reply for the %vth goalstatev2: %v", (*in).FormatVersion,(*in).MessageTotalOperationTime)
+		}
+	}()
+	for a:= 0 ; a < number_of_calls ; a ++{
+		v2 := schema.GoalStateV2{
+			FormatVersion:       uint32(a),
+			HostResources:       nil,
+			VpcStates:           nil,
+			SubnetStates:        nil,
+			PortStates:          nil,
+			DhcpStates:          nil,
+			NeighborStates:      nil,
+			SecurityGroupStates: nil,
+			RouterStates:        nil,
+			GatewayStates:       nil,
+		}
+		if err:= stream.Send(&v2); err != nil{
+			fmt.Printf("Sending GoalStateV2: %v gave this error: %v\n", v2.FormatVersion, err)
+		}
+	}
+	fmt.Println("All gsv2 sent, closing the stream")
+	stream.CloseSend()
+	<-waitc
 }
