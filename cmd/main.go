@@ -174,8 +174,10 @@ func runClient(server_ip string, number_of_calls int){
 		if err:= stream.Send(&v2); err != nil{
 			fmt.Printf("Sending GoalStateV2: %v gave this error: %v\n", v2.FormatVersion, err)
 		}
+		fmt.Printf("Sent the %vth gsv2\n", a)
 	}
 	fmt.Println("All gsv2 sent, closing the stream")
+	time.Sleep(time.Second * 10)
 	stream.CloseSend()
 	<-waitc
 }
