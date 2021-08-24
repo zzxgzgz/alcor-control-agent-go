@@ -25,7 +25,7 @@ func main() {
 	}else if args_without_program_name[0] == "c" {
 		server_ip := "0.0.0.0"
 		if len(args_without_program_name )> 1{
-			server_ip = os.Args[1]
+			server_ip = args_without_program_name[1]
 		}
 		runClient(server_ip)
 	}
