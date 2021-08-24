@@ -24,10 +24,14 @@ func main() {
 		 runServer()
 	}else if args_without_program_name[0] == "c" {
 		server_ip := "0.0.0.0"
+		number_of_calls := 200
 		if len(args_without_program_name )> 1{
 			server_ip = args_without_program_name[1]
 		}
-		runClient(server_ip)
+		if len(args_without_program_name) > 2{
+			number_of_calls, _ = strconv.Atoi(args_without_program_name[2])
+		}
+		runClient(server_ip, number_of_calls)
 	}
 
 	fmt.Println("Goodbye")
@@ -73,8 +77,8 @@ func runServer(){
 //	}
 //}
 
-func runClient(server_ip string){
-	number_of_calls := 200
+func runClient(server_ip string, number_of_calls int){
+	//number_of_calls := 200
 	var waitGroup = sync.WaitGroup{}
 	fmt.Println("Running client and trying to connect to server at ", server_ip+":9000")
 	time.Sleep(10 * time.Second)
@@ -97,7 +101,8 @@ func runClient(server_ip string){
 		waitGroup.Add(1)
 		go func(id int) {
 			defer waitGroup.Done()
-			fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
+			//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
+			call_start := time.Now()
 			state_request := schema.HostRequest_ResourceStateRequest{
 				RequestType:     schema.RequestType_ON_DEMAND,
 				RequestId:       strconv.Itoa(id),
@@ -117,12 +122,16 @@ func runClient(server_ip string){
 				StateRequests: state_request_array,
 			}
 			//jobs <- &host_request
+			send_request_time := time.Now()
 			host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
+			received_reply_time := time.Now()
 			if err != nil {
 				log.Fatalf("Error when calling RequestGoalStates: %s", err)
 			}
-			log.Printf("Response from server: %v\n", host_request_reply.OperationStatuses[0].RequestId)
 			time.Sleep(time.Millisecond * 30)
+			log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+				id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+				host_request_reply.OperationStatuses[0].RequestId)
 		}(i)
 	}
 	waitGroup.Wait()
