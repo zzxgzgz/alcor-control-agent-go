@@ -9,6 +9,7 @@ import (
 )
 
 type Goalstate_receiving_server struct {
+	Received_goalstatev2_count int
 }
 
 func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Context, goalState *schema.GoalState) (*schema.GoalStateOperationReply, error){
@@ -38,6 +39,7 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 			time.Sleep(time.Millisecond * 30)
 			stream_server.Send(&reply)
 		}()
+		s.Received_goalstatev2_count ++
 	}
 	return  nil
 }

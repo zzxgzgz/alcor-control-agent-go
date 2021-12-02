@@ -6,7 +6,6 @@ import (
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
 	"github.com/zzxgzgz/alcor-control-agent-go/server"
 	"google.golang.org/grpc"
-	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -16,24 +15,49 @@ import (
 	"time"
 )
 
+var aca_server_port string
+var ncm_ip string
+var ncm_gRPC_port string
+var client_call_length_in_seconds int
+
 func main() {
-	fmt.Println("hello world")
+	log.Println("hello world")
 
 	args_without_program_name := os.Args[1:]
 
-	if args_without_program_name[0] == "s" {
-		 runServer()
-	}else if args_without_program_name[0] == "c" {
-		server_ip := "0.0.0.0"
-		number_of_calls := 200
-		if len(args_without_program_name )> 1{
-			server_ip = args_without_program_name[1]
-		}
-		if len(args_without_program_name) > 2{
-			number_of_calls, _ = strconv.Atoi(args_without_program_name[2])
-		}
-		runClient(server_ip, number_of_calls)
+	aca_server_port = args_without_program_name[0]
+
+	ncm_ip = args_without_program_name[1]
+
+	ncm_gRPC_port = args_without_program_name[2]
+
+	var err error = nil
+	client_call_length_in_seconds, err = strconv.Atoi(args_without_program_name[3])
+
+	log.Printf("Running gRPC server at localhost:%s, gRPC client connecting to server at: %s:%s, the test will last %d seconds\n", aca_server_port, ncm_ip, ncm_gRPC_port, client_call_length_in_seconds)
+
+	if err != nil {
+		log.Printf("Got error [%s] when trying to get number of calls, returning ... \n", err.Error())
+		os.Exit(-1)
 	}
+
+	go runServer()
+
+	runClient()
+
+	//if args_without_program_name[0] == "s" {
+	//	 runServer()
+	//}else if args_without_program_name[0] == "c" {
+	//	server_ip := "0.0.0.0"
+	//	number_of_calls := 200
+	//	if len(args_without_program_name )> 1{
+	//		server_ip = args_without_program_name[1]
+	//	}
+	//	if len(args_without_program_name) > 2{
+	//		number_of_calls, _ = strconv.Atoi(args_without_program_name[2])
+	//	}
+	//	runClient(server_ip, number_of_calls)
+	//}
 
 	fmt.Println("Goodbye")
 }
@@ -41,7 +65,7 @@ func main() {
 
 func runServer(){
 
-	lis, err := net.Listen("tcp", ":9000")
+	lis, err := net.Listen("tcp", ":50001")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -50,7 +74,9 @@ func runServer(){
 
 	grpcServer := grpc.NewServer(opts ...)
 
-	goalstate_receiving_server := server.Goalstate_receiving_server{}
+	goalstate_receiving_server := server.Goalstate_receiving_server{
+		0,
+	}
 
 	schema.RegisterGoalStateProvisionerServer(grpcServer, &goalstate_receiving_server)
 	fmt.Println("Now running a goalstate receiving server")
@@ -78,12 +104,12 @@ func runServer(){
 //	}
 //}
 
-func runClient(server_ip string, number_of_calls int){
+func runClient(){
 	//number_of_calls := 200
 	var waitGroup = sync.WaitGroup{}
-	fmt.Println("Running client and trying to connect to server at ", server_ip+":9000")
+	fmt.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
 	time.Sleep(10 * time.Second)
-	conn, err := grpc.Dial(server_ip + ":9000", grpc.WithInsecure())
+	conn, err := grpc.Dial(ncm_ip + ":9000", grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("did not connect: %s", err)
 	}
@@ -98,8 +124,12 @@ func runClient(server_ip string, number_of_calls int){
 	//for w:=0 ; w < number_of_workers ; w ++{
 	//	go worker(&waitGroup, &c, w, jobs, results)
 	//}
-	for i:=0 ; i < number_of_calls ; i ++{
+
+
+	request_id := 0
+	for now := time.Now(); int((now.Sub(begin)).Seconds()) < client_call_length_in_seconds ;{
 		waitGroup.Add(1)
+
 		go func(id int) {
 			defer waitGroup.Done()
 			//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
@@ -108,9 +138,9 @@ func runClient(server_ip string, number_of_calls int){
 				RequestType:     schema.RequestType_ON_DEMAND,
 				RequestId:       strconv.Itoa(id),
 				TunnelId:        1,
-				SourceIp:        "123.123.321.321",
+				SourceIp:        "10.0.0.3",
 				SourcePort:      999,
-				DestinationIp:   "333.222.111.000",
+				DestinationIp:   "10.0.2.2",
 				DestinationPort: 888,
 				Ethertype:       schema.EtherType_IPV4,
 				Protocol:        schema.Protocol_ARP,
@@ -133,14 +163,18 @@ func runClient(server_ip string, number_of_calls int){
 			log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
 				id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
 				host_request_reply.OperationStatuses[0].RequestId)
-		}(i)
+		}(request_id)
+		// update now and update request ID
+		request_id ++
+		now = time.Now()
 	}
 	waitGroup.Wait()
 	end := time.Now()
 	diff := end.Sub(begin)
-	fmt.Println("Finishing ", number_of_calls, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
+	fmt.Println("Finishing ", client_call_length_in_seconds, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
 
-
+	// commenting out this goalstate sending part in the client, as it should now be done by NCM.
+/*
 	fmt.Println("Time to call the same amount of PushGoalStates streaming calls")
 	stream, err := c.PushGoalStatesStream(context.Background())
 	waitc := make(chan struct{})
@@ -155,10 +189,10 @@ func runClient(server_ip string, number_of_calls int){
 			if err != nil {
 				fmt.Printf("Failed to receive a goalstate programming result: %v\n", err)
 			}
-			fmt.Printf("Received a goalstate operation reply for the %vth goalstatev2: %v", (*in).FormatVersion,(*in).MessageTotalOperationTime)
+			fmt.Printf("Received a goalstate operation reply for the %vth goalstatev2: %v\n", (*in).FormatVersion,(*in).MessageTotalOperationTime)
 		}
 	}()
-	for a:= 0 ; a < number_of_calls ; a ++{
+	for a:= 0 ; a < client_call_length_in_seconds ; a ++{
 		v2 := schema.GoalStateV2{
 			FormatVersion:       uint32(a),
 			HostResources:       nil,
@@ -180,4 +214,5 @@ func runClient(server_ip string, number_of_calls int){
 	time.Sleep(time.Second * 10)
 	stream.CloseSend()
 	<-waitc
+ */
 }
