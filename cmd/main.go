@@ -140,7 +140,7 @@ func runClient(){
 			state_request := schema.HostRequest_ResourceStateRequest{
 				RequestType:     schema.RequestType_ON_DEMAND,
 				RequestId:       strconv.Itoa(id),
-				TunnelId:        1,
+				TunnelId:        21,
 				SourceIp:        "10.0.0.3",
 				SourcePort:      1,
 				DestinationIp:   "10.0.2.2",
