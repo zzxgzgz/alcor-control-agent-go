@@ -109,7 +109,7 @@ func runClient(){
 	var waitGroup = sync.WaitGroup{}
 	fmt.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
 	time.Sleep(10 * time.Second)
-	conn, err := grpc.Dial(ncm_ip + ":9000", grpc.WithInsecure())
+	conn, err := grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("did not connect: %s", err)
 	}
@@ -127,7 +127,7 @@ func runClient(){
 
 
 	request_id := 0
-	for now := time.Now(); int((now.Sub(begin)).Seconds()) < client_call_length_in_seconds ;{
+	for i := 0 ; i < client_call_length_in_seconds ; i ++ {//now := time.Now(); int((now.Sub(begin)).Seconds()) < client_call_length_in_seconds ;{
 		waitGroup.Add(1)
 
 		go func(id int) {
@@ -139,14 +139,14 @@ func runClient(){
 				RequestId:       strconv.Itoa(id),
 				TunnelId:        1,
 				SourceIp:        "10.0.0.3",
-				SourcePort:      999,
+				SourcePort:      1,
 				DestinationIp:   "10.0.2.2",
-				DestinationPort: 888,
+				DestinationPort: 1,
 				Ethertype:       schema.EtherType_IPV4,
 				Protocol:        schema.Protocol_ARP,
 			}
 			state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
-			fmt.Println(fmt.Sprintf("Sending the %v th request", id))
+			//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
 
 			host_request := schema.HostRequest{
 				FormatVersion: rand.Uint32(),
@@ -166,7 +166,7 @@ func runClient(){
 		}(request_id)
 		// update now and update request ID
 		request_id ++
-		now = time.Now()
+		//now = time.Now()
 	}
 	waitGroup.Wait()
 	end := time.Now()
