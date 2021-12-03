@@ -58,7 +58,10 @@ func main() {
 	//	}
 	//	runClient(server_ip, number_of_calls)
 	//}
-
+	select {
+	case <-time.After(60 * time.Second):
+		log.Println("It has been 60 seconds, goodbye")
+	}
 	fmt.Println("Goodbye")
 }
 
