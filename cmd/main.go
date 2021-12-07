@@ -18,7 +18,12 @@ import (
 var aca_server_port string
 var ncm_ip string
 var ncm_gRPC_port string
-var client_call_length_in_seconds int
+const latency_mode = 1
+const throughput_mode = 2
+var test_mode_latency_or_throughput int = latency_mode
+var number_of_calls = 0
+var client_call_length_in_seconds int = 1
+
 
 func main() {
 	log.Println("hello world")
@@ -31,33 +36,22 @@ func main() {
 
 	ncm_gRPC_port = args_without_program_name[2]
 
-	var err error = nil
-	client_call_length_in_seconds, err = strconv.Atoi(args_without_program_name[3])
+	test_mode_latency_or_throughput,_ = strconv.Atoi(args_without_program_name[3])
+
+	if test_mode_latency_or_throughput == throughput_mode{
+		client_call_length_in_seconds,_ = strconv.Atoi(args_without_program_name[4])
+	}else if test_mode_latency_or_throughput == latency_mode {
+		number_of_calls,_ = strconv.Atoi(args_without_program_name[4])
+	}else{
+		log.Fatalf("Client got unknown test mode: %v, exiting...", test_mode_latency_or_throughput)
+	}
 
 	log.Printf("Running gRPC server at localhost:%s, gRPC client connecting to server at: %s:%s, the test will last %d seconds\n", aca_server_port, ncm_ip, ncm_gRPC_port, client_call_length_in_seconds)
-
-	if err != nil {
-		log.Printf("Got error [%s] when trying to get number of calls, returning ... \n", err.Error())
-		os.Exit(-1)
-	}
 
 	go runServer()
 
 	runClient()
 
-	//if args_without_program_name[0] == "s" {
-	//	 runServer()
-	//}else if args_without_program_name[0] == "c" {
-	//	server_ip := "0.0.0.0"
-	//	number_of_calls := 200
-	//	if len(args_without_program_name )> 1{
-	//		server_ip = args_without_program_name[1]
-	//	}
-	//	if len(args_without_program_name) > 2{
-	//		number_of_calls, _ = strconv.Atoi(args_without_program_name[2])
-	//	}
-	//	runClient(server_ip, number_of_calls)
-	//}
 	select {
 	case <-time.After(60 * time.Second):
 		log.Println("It has been 60 seconds, goodbye")
@@ -89,24 +83,6 @@ func runServer(){
 
 }
 
-
-//func worker(wg *sync.WaitGroup,c *schema.GoalStateProvisionerClient,id int, jobs <-chan *schema.HostRequest, results chan<-*schema.HostRequestReply){
-//	for job := range jobs {
-//		fmt.Println("worker", id, "started  job")
-//		time.Sleep(time.Second)
-//		fmt.Println("worker", id, "finished job")
-//
-//		host_request_reply, err := (*c).RequestGoalStates(context.Background(), job)
-//		if err != nil {
-//			log.Fatalf("Error when calling RequestGoalStates: %s", err)
-//		}
-//		log.Printf("Response from server: %v\n", host_request_reply.FormatVersion)
-//		time.Sleep(time.Millisecond * 30)
-//		results <- host_request_reply
-//		(*wg).Done()
-//	}
-//}
-
 func runClient(){
 	//number_of_calls := 200
 	var waitGroup = sync.WaitGroup{}
@@ -130,51 +106,112 @@ func runClient(){
 
 
 	request_id := 0
-	for i := 0 ; i < client_call_length_in_seconds ; i ++ {//now := time.Now(); int((now.Sub(begin)).Seconds()) < client_call_length_in_seconds ;{
-		waitGroup.Add(1)
+	if test_mode_latency_or_throughput == latency_mode{
+		log.Printf("Client running in latency mode, it will send %d on-demand requests concurrently\n", number_of_calls)
+		for i := 0 ; i < number_of_calls ; i ++ {
+			waitGroup.Add(1)
 
-		go func(id int) {
-			defer waitGroup.Done()
-			//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
-			call_start := time.Now()
-			state_request := schema.HostRequest_ResourceStateRequest{
-				RequestType:     schema.RequestType_ON_DEMAND,
-				RequestId:       strconv.Itoa(id),
-				TunnelId:        21,
-				SourceIp:        "10.0.0.3",
-				SourcePort:      1,
-				DestinationIp:   "10.0.2.2",
-				DestinationPort: 1,
-				Ethertype:       schema.EtherType_IPV4,
-				Protocol:        schema.Protocol_ARP,
-			}
-			state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
-			//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
+			go func(id int) {
+				defer waitGroup.Done()
+				//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
+				call_start := time.Now()
+				state_request := schema.HostRequest_ResourceStateRequest{
+					RequestType:     schema.RequestType_ON_DEMAND,
+					RequestId:       strconv.Itoa(id),
+					TunnelId:        21,				// this should be changed when testing with more than 1 VPCs
+					SourceIp:        "10.0.0.3",		// this should be changed when so that we can test different src IPs
+					SourcePort:      1,
+					DestinationIp:   "10.0.2.2",		// this should be changed when so that we can test different dest IPs
+					DestinationPort: 1,
+					Ethertype:       schema.EtherType_IPV4,
+					Protocol:        schema.Protocol_ARP,
+				}
+				state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
+				//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
 
-			host_request := schema.HostRequest{
-				FormatVersion: rand.Uint32(),
-				StateRequests: state_request_array,
+				host_request := schema.HostRequest{
+					FormatVersion: rand.Uint32(),
+					StateRequests: state_request_array,
+				}
+				//jobs <- &host_request
+				send_request_time := time.Now()
+				host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
+				received_reply_time := time.Now()
+				if err != nil {
+					log.Fatalf("Error when calling RequestGoalStates: %s", err)
+				}
+				time.Sleep(time.Millisecond * 30)
+				log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+					id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+					host_request_reply.OperationStatuses[0].RequestId)
+			}(request_id)
+			// update now and update request ID
+			request_id ++
+			//now = time.Now()
+		}
+		waitGroup.Wait()
+		end := time.Now()
+		diff := end.Sub(begin)
+		fmt.Println("Finishing ", number_of_calls, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
+
+	}else if test_mode_latency_or_throughput == throughput_mode{
+		log.Printf("Client running in throughput mode, it will send on-demand requests concurrently for %d seconds", client_call_length_in_seconds)
+		through_put_test_start_time := time.Now()
+		through_put_test_end_time := through_put_test_start_time.Add(time.Duration(client_call_length_in_seconds) * time.Second )
+		request_id := 0
+		count := 0
+		for {
+			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
+				break
 			}
-			//jobs <- &host_request
-			send_request_time := time.Now()
-			host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
-			received_reply_time := time.Now()
-			if err != nil {
-				log.Fatalf("Error when calling RequestGoalStates: %s", err)
-			}
-			time.Sleep(time.Millisecond * 30)
-			log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
-				id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
-				host_request_reply.OperationStatuses[0].RequestId)
-		}(request_id)
-		// update now and update request ID
-		request_id ++
-		//now = time.Now()
+			waitGroup.Add(1)
+
+			go func(id int) {
+				defer waitGroup.Done()
+				//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
+				call_start := time.Now()
+				state_request := schema.HostRequest_ResourceStateRequest{
+					RequestType:     schema.RequestType_ON_DEMAND,
+					RequestId:       strconv.Itoa(id),
+					TunnelId:        21,				// this should be changed when testing with more than 1 VPCs
+					SourceIp:        "10.0.0.3",		// this should be changed when so that we can test different src IPs
+					SourcePort:      1,
+					DestinationIp:   "10.0.2.2",		// this should be changed when so that we can test different dest IPs
+					DestinationPort: 1,
+					Ethertype:       schema.EtherType_IPV4,
+					Protocol:        schema.Protocol_ARP,
+				}
+				state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
+				//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
+
+				host_request := schema.HostRequest{
+					FormatVersion: rand.Uint32(),
+					StateRequests: state_request_array,
+				}
+				//jobs <- &host_request
+				send_request_time := time.Now()
+				host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
+				received_reply_time := time.Now()
+				if err != nil {
+					log.Fatalf("Error when calling RequestGoalStates: %s", err)
+				}
+				time.Sleep(time.Millisecond * 30)
+				log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+					id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+					host_request_reply.OperationStatuses[0].RequestId)
+				count ++
+			}(request_id)
+			// update now and update request ID
+			request_id ++
+			//now = time.Now()
+		}
+		waitGroup.Wait()
+		end := time.Now()
+		diff := end.Sub(begin)
+		fmt.Println("Sent ", count, " RequestGoalStates calls in ", client_call_length_in_seconds ," seconds, took ",diff.Milliseconds(), " ms to receive the results")
+	}else{
+		log.Fatalf("Client got unknown test mode: %v, exiting...", test_mode_latency_or_throughput)
 	}
-	waitGroup.Wait()
-	end := time.Now()
-	diff := end.Sub(begin)
-	fmt.Println("Finishing ", client_call_length_in_seconds, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
 
 	// commenting out this goalstate sending part in the client, as it should now be done by NCM.
 /*

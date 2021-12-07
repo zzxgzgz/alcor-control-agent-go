@@ -9,7 +9,7 @@ import (
 )
 
 type Host_request_sending_client struct {
-	
+	Received_on_demand_reply_count int
 }
 
 
