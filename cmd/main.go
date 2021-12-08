@@ -72,7 +72,7 @@ func runServer(){
 	grpcServer := grpc.NewServer(opts ...)
 
 	goalstate_receiving_server := server.Goalstate_receiving_server{
-		0,
+		Received_goalstatev2_count: 0,
 	}
 
 	schema.RegisterGoalStateProvisionerServer(grpcServer, &goalstate_receiving_server)

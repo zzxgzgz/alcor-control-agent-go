@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
-	"io"
+	"sync"
 	"time"
 )
 
 type Goalstate_receiving_server struct {
 	Received_goalstatev2_count int
+	mu sync.Mutex
 }
 
 func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Context, goalState *schema.GoalState) (*schema.GoalStateOperationReply, error){
@@ -20,27 +21,30 @@ func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Conte
 func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.GoalStateProvisioner_PushGoalStatesStreamServer) error{
 
 	fmt.Println("Called PushGoalStatesStream for the ", s.Received_goalstatev2_count, " time")
-	for{
-		gsv2_ptr, err := stream_server.Recv()
-		if err == io.EOF{
-			fmt.Println("End of stream, getting out")
-			break
-		}
-		if err != nil {
-			fmt.Printf("Got this error when reading from stream: %v\n", err)
-		}
-		// use this following go routine to simulate using another thread to program goalstatev2, and reply
-		go func() {
-			reply := schema.GoalStateOperationReply{
-				FormatVersion:             (*gsv2_ptr).FormatVersion,
-				OperationStatuses:         nil,
-				MessageTotalOperationTime: 30,
-			}
-			//time.Sleep(time.Millisecond * 30)
-			stream_server.Send(&reply)
-		}()
-		s.Received_goalstatev2_count ++
+	//for{
+	gsv2_ptr, err := stream_server.Recv()
+	//if err == io.EOF{
+	//	fmt.Println("End of stream, getting out")
+	//	break
+	//}
+	if err != nil {
+		fmt.Printf("Got this error when reading from stream: %v\n", err)
 	}
+	fmt.Println("Read a gsv2 from the stream")
+	// use this following go routine to simulate using another thread to program goalstatev2, and reply
+	go func() {
+		reply := schema.GoalStateOperationReply{
+			FormatVersion:             (*gsv2_ptr).FormatVersion,
+			OperationStatuses:         nil,
+			MessageTotalOperationTime: 30,
+		}
+		//time.Sleep(time.Millisecond * 30)
+		stream_server.Send(&reply)
+	}()
+	s.mu.Lock()
+	s.Received_goalstatev2_count ++
+	s.mu.Unlock()
+	//}
 	return  nil
 }
 
