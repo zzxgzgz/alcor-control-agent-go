@@ -24,7 +24,7 @@ var test_mode_latency_or_throughput int = latency_mode
 var number_of_calls = 0
 var client_call_length_in_seconds int = 1
 var global_server *grpc.Server
-var global_server_api_instance server.Goalstate_receiving_server
+var global_server_api_instance *server.Goalstate_receiving_server
 var global_client_connection *grpc.ClientConn
 
 func main() {
