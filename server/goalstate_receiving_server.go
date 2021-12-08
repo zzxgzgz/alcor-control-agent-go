@@ -39,7 +39,8 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 			MessageTotalOperationTime: 30,
 		}
 		//time.Sleep(time.Millisecond * 30)
-		stream_server.Send(&reply)
+		stream_server.SendMsg(&reply)
+		//stream_server.Send(&reply)
 	}()
 	s.mu.Lock()
 	s.Received_goalstatev2_count ++
