@@ -23,7 +23,9 @@ const throughput_mode = 2
 var test_mode_latency_or_throughput int = latency_mode
 var number_of_calls = 0
 var client_call_length_in_seconds int = 1
-
+var global_server *grpc.Server
+var global_server_api_instance server.Goalstate_receiving_server
+var global_client_connection *grpc.ClientConn
 
 func main() {
 	log.Println("hello world")
@@ -69,15 +71,15 @@ func runServer(){
 
 	var opts []grpc.ServerOption
 
-	grpcServer := grpc.NewServer(opts ...)
+	global_server = grpc.NewServer(opts ...)
 
-	goalstate_receiving_server := server.Goalstate_receiving_server{
+	global_server_api_instance := server.Goalstate_receiving_server{
 		Received_goalstatev2_count: 0,
 	}
 
-	schema.RegisterGoalStateProvisionerServer(grpcServer, &goalstate_receiving_server)
+	schema.RegisterGoalStateProvisionerServer(global_server, &global_server_api_instance)
 	fmt.Println("Now running a goalstate receiving server")
-	if err := grpcServer.Serve(lis); err != nil {
+	if err := global_server.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %s", err)
 	}
 
@@ -88,12 +90,13 @@ func runClient(){
 	var waitGroup = sync.WaitGroup{}
 	fmt.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
 	//time.Sleep(10 * time.Second)
-	conn, err := grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
+	var err error
+	global_client_connection, err = grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("did not connect: %s", err)
 	}
-	defer conn.Close()
-	c := schema.NewGoalStateProvisionerClient(conn)
+	defer global_client_connection.Close()
+	c := schema.NewGoalStateProvisionerClient(global_client_connection)
 	begin := time.Now()
 	// try to use the same amount of workers (thread pool size) as the current ACA in test environment
 	//number_of_workers := 16
@@ -164,7 +167,9 @@ func runClient(){
 		count := 0
 		for {
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
-				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d\n", request_id +1, count)
+				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, global_server_api_instance.Received_goalstatev2_count)
+				global_server.Stop()
+				log.Println("Time's up, stop the server")
 				break
 			}
 			waitGroup.Add(1)
