@@ -164,6 +164,7 @@ func runClient(){
 		count := 0
 		for {
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
+				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d\n", request_id +1, count)
 				break
 			}
 			waitGroup.Add(1)
@@ -207,6 +208,7 @@ func runClient(){
 			request_id ++
 			//now = time.Now()
 		}
+		log.Println("Outside of the for loop, now wait a little bit")
 		waitGroup.Wait()
 		end := time.Now()
 		diff := end.Sub(begin)
