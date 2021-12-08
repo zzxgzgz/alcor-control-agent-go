@@ -87,7 +87,7 @@ func runClient(){
 	//number_of_calls := 200
 	var waitGroup = sync.WaitGroup{}
 	fmt.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
-	time.Sleep(10 * time.Second)
+	//time.Sleep(10 * time.Second)
 	conn, err := grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("did not connect: %s", err)
@@ -104,6 +104,8 @@ func runClient(){
 	//	go worker(&waitGroup, &c, w, jobs, results)
 	//}
 
+	fmt.Println("Press the Enter Key to terminate the console screen!")
+	fmt.Scanln() // wait for Enter Key
 
 	request_id := 0
 	if test_mode_latency_or_throughput == latency_mode{
