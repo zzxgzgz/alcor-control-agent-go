@@ -19,7 +19,7 @@ func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Conte
 
 func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.GoalStateProvisioner_PushGoalStatesStreamServer) error{
 
-	fmt.Println("Called PushGoalStatesStream")
+	fmt.Println("Called PushGoalStatesStream for the ", s.Received_goalstatev2_count, " time")
 	for{
 		gsv2_ptr, err := stream_server.Recv()
 		if err == io.EOF{
@@ -36,7 +36,7 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 				OperationStatuses:         nil,
 				MessageTotalOperationTime: 30,
 			}
-			time.Sleep(time.Millisecond * 30)
+			//time.Sleep(time.Millisecond * 30)
 			stream_server.Send(&reply)
 		}()
 		s.Received_goalstatev2_count ++
