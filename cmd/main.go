@@ -257,4 +257,5 @@ func runClient(){
 	stream.CloseSend()
 	<-waitc
  */
+	log.Println("This is the end of runClient")
 }
