@@ -28,9 +28,9 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 	if err != nil {
 		fmt.Printf("Got this error when reading from stream: %v\n", err)
 	}
-	s.mu.Lock()
+	s.Mu.Lock()
 	s.Received_goalstatev2_count ++
-	s.mu.Unlock()
+	s.Mu.Unlock()
 	fmt.Println("Called PushGoalStatesStream for the ", s.Received_goalstatev2_count, " time")
 	fmt.Println("Read a gsv2 from the stream")
 	// use this following go routine to simulate using another thread to program goalstatev2, and reply
