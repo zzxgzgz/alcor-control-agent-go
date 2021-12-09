@@ -6,6 +6,7 @@ import (
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
 	"github.com/zzxgzgz/alcor-control-agent-go/server"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"log"
 	"math/rand"
 	"net"
@@ -169,6 +170,7 @@ func runClient(){
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
 				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, global_server_api_instance.Received_goalstatev2_count)
 				global_server.Stop()
+				global_client_connection.Close()
 				log.Println("Time's up, stop the server")
 				break
 			}
@@ -197,18 +199,22 @@ func runClient(){
 					StateRequests: state_request_array,
 				}
 				//jobs <- &host_request
-				send_request_time := time.Now()
-				host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
-				received_reply_time := time.Now()
-				if err != nil {
-					log.Printf("Error when calling RequestGoalStates: %s\n", err)
-					return
+				if global_client_connection.GetState() == connectivity.Idle ||
+					global_client_connection.GetState() == connectivity.Ready{
+					send_request_time := time.Now()
+					host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
+					received_reply_time := time.Now()
+					if err != nil {
+						log.Printf("Error when calling RequestGoalStates: %s\n", err)
+						return
+					}
+					//time.Sleep(time.Millisecond * 30)
+					log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+						id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+						host_request_reply.OperationStatuses[0].RequestId)
+					count ++
 				}
-				time.Sleep(time.Millisecond * 30)
-				log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
-					id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
-					host_request_reply.OperationStatuses[0].RequestId)
-				count ++
+
 			}(request_id)
 			// update now and update request ID
 			request_id ++
