@@ -201,7 +201,8 @@ func runClient(){
 				host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
 				received_reply_time := time.Now()
 				if err != nil {
-					log.Fatalf("Error when calling RequestGoalStates: %s", err)
+					log.Printf("Error when calling RequestGoalStates: %s\n", err)
+					return
 				}
 				time.Sleep(time.Millisecond * 30)
 				log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
