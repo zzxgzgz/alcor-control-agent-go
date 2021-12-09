@@ -164,10 +164,15 @@ func runClient(){
 		log.Printf("Client running in throughput mode, it will send on-demand requests concurrently for %d seconds", client_call_length_in_seconds)
 		through_put_test_start_time := time.Now()
 		through_put_test_end_time := through_put_test_start_time.Add(time.Duration(client_call_length_in_seconds) * time.Second )
+		//test_stop_channel := make(chan struct{})
 		request_id := 0
 		count := 0
+		ctx := context.Background()
+
 		for {
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
+				//test_stop_channel <- struct{}{}
+				ctx.Done()
 				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, &global_server_api_instance.Received_goalstatev2_count)
 				global_server.Stop()
 				global_client_connection.Close()
@@ -175,7 +180,7 @@ func runClient(){
 				break
 			}
 
-			go func(id int) {
+			go func(id int, ctx *context.Context) {
 				defer waitGroup.Done()
 				//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
 				call_start := time.Now()
@@ -202,7 +207,7 @@ func runClient(){
 					global_client_connection.GetState() == connectivity.Ready{
 					waitGroup.Add(1)
 					send_request_time := time.Now()
-					host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
+					host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
 					received_reply_time := time.Now()
 					if err != nil {
 						log.Printf("Error when calling RequestGoalStates: %s\n", err)
@@ -215,7 +220,7 @@ func runClient(){
 					count ++
 				}
 
-			}(request_id)
+			}(request_id, &ctx)
 			// update now and update request ID
 			request_id ++
 			//now = time.Now()
