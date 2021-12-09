@@ -173,10 +173,12 @@ func runClient(){
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
 				//test_stop_channel <- struct{}{}
 				ctx.Done()
-				//log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, &global_server_api_instance.Received_goalstatev2_count)
+				global_server_api_instance.Mu.Lock()
 				global_server.Stop()
+				global_server_api_instance.Mu.Unlock()
 				global_client_connection.Close()
 				log.Println("Time's up, stop the server")
+				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, &global_server_api_instance.Received_goalstatev2_count)
 				break
 			}
 
