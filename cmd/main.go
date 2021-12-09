@@ -168,13 +168,12 @@ func runClient(){
 		count := 0
 		for {
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
-				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, global_server_api_instance.Received_goalstatev2_count)
+				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, &global_server_api_instance.Received_goalstatev2_count)
 				global_server.Stop()
 				global_client_connection.Close()
 				log.Println("Time's up, stop the server")
 				break
 			}
-			waitGroup.Add(1)
 
 			go func(id int) {
 				defer waitGroup.Done()
@@ -201,6 +200,7 @@ func runClient(){
 				//jobs <- &host_request
 				if global_client_connection.GetState() == connectivity.Idle ||
 					global_client_connection.GetState() == connectivity.Ready{
+					waitGroup.Add(1)
 					send_request_time := time.Now()
 					host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
 					received_reply_time := time.Now()
