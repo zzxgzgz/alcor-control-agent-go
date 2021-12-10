@@ -19,33 +19,39 @@ func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Conte
 }
 
 func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.GoalStateProvisioner_PushGoalStatesStreamServer) error{
-	//for{
-	gsv2_ptr, err := stream_server.Recv()
-	//if err == io.EOF{
-	//	fmt.Println("End of stream, getting out")
-	//	break
-	//}
-	if err != nil {
-		fmt.Printf("Got this error when reading from stream: %v\n", err)
-	}
-	s.Mu.Lock()
-	s.Received_goalstatev2_count ++
-	s.Mu.Unlock()
-	fmt.Println("Called PushGoalStatesStream for the ", s.Received_goalstatev2_count, " time")
-	fmt.Println("Read a gsv2 from the stream")
-	// use this following go routine to simulate using another thread to program goalstatev2, and reply
-	go func() {
-		reply := schema.GoalStateOperationReply{
-			FormatVersion:             (*gsv2_ptr).FormatVersion,
-			OperationStatuses:         nil,
-			MessageTotalOperationTime: 30,
+	select {
+		case <-stream_server.Context().Done():
+			fmt.Println("Canceled because context is Done")
+			return stream_server.Context().Err()
+	default:
+		//for{
+		gsv2_ptr, err := stream_server.Recv()
+		//if err == io.EOF{
+		//	fmt.Println("End of stream, getting out")
+		//	break
+		//}
+		if err != nil {
+			fmt.Printf("Got this error when reading from stream: %v\n", err)
 		}
-		//time.Sleep(time.Millisecond * 30)
-		stream_server.SendMsg(&reply)
-		//stream_server.Send(&reply)
-	}()
+		s.Mu.Lock()
+		s.Received_goalstatev2_count ++
+		s.Mu.Unlock()
+		fmt.Println("Called PushGoalStatesStream for the ", s.Received_goalstatev2_count, " time")
+		fmt.Println("Read a gsv2 from the stream")
+		// use this following go routine to simulate using another thread to program goalstatev2, and reply
+		go func() {
+			reply := schema.GoalStateOperationReply{
+				FormatVersion:             (*gsv2_ptr).FormatVersion,
+				OperationStatuses:         nil,
+				MessageTotalOperationTime: 30,
+			}
+			//time.Sleep(time.Millisecond * 30)
+			stream_server.SendMsg(&reply)
+			//stream_server.Send(&reply)
+		}()
+		//}
+	}
 
-	//}
 	return  nil
 }
 

@@ -169,6 +169,9 @@ func runClient(){
 		count := 0
 		ctx := context.Background()
 
+		ctx, cancel := context.WithDeadline(ctx, through_put_test_end_time)
+		defer cancel()
+
 		for {
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
 				//test_stop_channel <- struct{}{}
@@ -209,17 +212,22 @@ func runClient(){
 					global_client_connection.GetState() == connectivity.Ready{
 					waitGroup.Add(1)
 					send_request_time := time.Now()
-					host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
-					received_reply_time := time.Now()
-					if err != nil {
-						log.Printf("Error when calling RequestGoalStates: %s\n", err)
-						return
-					}
-					//time.Sleep(time.Millisecond * 30)
-					log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
-						id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
-						host_request_reply.OperationStatuses[0].RequestId)
-					count ++
+					select {
+						case <-(*ctx).Done():
+							return
+					default:
+						host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
+						received_reply_time := time.Now()
+						if err != nil {
+							log.Printf("Error when calling RequestGoalStates: %s\n", err)
+							return
+						}
+						//time.Sleep(time.Millisecond * 30)
+						log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+							id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+							host_request_reply.OperationStatuses[0].RequestId)
+						count ++}
+
 				}
 
 			}(request_id, &ctx)
