@@ -177,7 +177,7 @@ func runClient(){
 				//test_stop_channel <- struct{}{}
 				ctx.Done()
 				global_server_api_instance.Mu.Lock()
-				global_server.Stop()
+				global_server.GracefulStop()
 				global_server_api_instance.Mu.Unlock()
 				global_client_connection.Close()
 				log.Println("Time's up, stop the server")
