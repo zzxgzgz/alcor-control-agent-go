@@ -2,26 +2,26 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
+	"log"
 	"sync"
 	"time"
 )
 
 type Goalstate_receiving_server struct {
-	Received_goalstatev2_count int
+	Received_goalstatev2_count *int
 	Mu sync.Mutex
 }
 
 func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Context, goalState *schema.GoalState) (*schema.GoalStateOperationReply, error){
-	fmt.Println("Called PushNetworkResourceStates")
+	log.Println("Called PushNetworkResourceStates")
 	return nil, nil
 }
 
 func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.GoalStateProvisioner_PushGoalStatesStreamServer) error{
 	select {
 		case <-stream_server.Context().Done():
-			fmt.Println("Canceled because context is Done")
+			log.Println("Canceled because context is Done")
 			return stream_server.Context().Err()
 	default:
 		//for{
@@ -31,14 +31,14 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 		//	break
 		//}
 		if err != nil {
-			fmt.Printf("Got this error when reading from stream: %v\n", err)
+			log.Printf("Got this error when reading from stream: %v\n", err)
 		}
 		if gsv2_ptr != nil {
 			s.Mu.Lock()
-			s.Received_goalstatev2_count ++
+			*(s.Received_goalstatev2_count) = *(s.Received_goalstatev2_count) + 1
 			s.Mu.Unlock()
-			fmt.Println("Called PushGoalStatesStream for the ", s.Received_goalstatev2_count, " time")
-			fmt.Println("Read a gsv2 from the stream")
+			log.Println("Called PushGoalStatesStream for the ", *(s.Received_goalstatev2_count), " time")
+			log.Println("Read a gsv2 from the stream")
 			// use this following go routine to simulate using another thread to program goalstatev2, and reply
 			//go func() {
 			reply := schema.GoalStateOperationReply{
@@ -59,7 +59,7 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 }
 
 func (s *Goalstate_receiving_server) RequestGoalStates(ctx context.Context, host_request *schema.HostRequest) (*schema.HostRequestReply, error){
-	fmt.Println("Called RequestGoalStates")
+	log.Println("Called RequestGoalStates")
 	response := schema.HostRequestReply{
 		FormatVersion:      123,
 		OperationStatuses:  []*schema.HostRequestReply_HostRequestOperationStatus{

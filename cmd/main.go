@@ -27,7 +27,33 @@ var client_call_length_in_seconds int = 1
 var global_server *grpc.Server
 var global_server_api_instance *server.Goalstate_receiving_server
 var global_client_connection *grpc.ClientConn
+var global_received_goalstate_count int = 0
 
+
+/*
+Arguments:
+1. aca_server_port, the port of the gRPC server
+2. ncm_ip, IP address of the NCM, used by the gRPC client to connect to the NCM
+3. ncm_gRPC_port, the gRPC port of NCM, used by the gRPC client to connect to the NCM
+4. test_mode_latency_or_throughput, a flag used to indicate which mode to run for the gRPC client.
+The throughput_mode, which sends as many requests as possible in a time interval, is 2;
+and the latency_mode, which sends a fixed number of requests, and see how much time it takes, is 1.
+5.1. client_call_length_in_seconds, used with the throughput_mode, indicates the time interval(in seconds) of the test.
+5.2. number_of_calls, used with the latency_mode, indicates how many requests the gRPC client will send.
+
+Examples:
+1) Run the throughput test for 10 seconds:
+```
+go build cmd/main.go
+./main 50001 ${ncm_ip} ${ncm_gRPC_port} 2 10
+```
+
+2) Run the latency test with 1000 on-demand requests:
+```
+go build cmd/main.go
+./main 50001 ${ncm_ip} ${ncm_gRPC_port} 1 1000
+```
+*/
 func main() {
 	log.Println("hello world")
 
@@ -54,15 +80,15 @@ func main() {
 	go runServer()
 
 	runClient()
-
-	select {
-	case <-time.After(60 * time.Second):
-		log.Println("It has been 60 seconds, goodbye")
-	}
-	fmt.Println("Goodbye")
+	//
+	//select {
+	//case <-time.After(60 * time.Second):
+	//	log.Println("It has been 60 seconds, goodbye")
+	//}
+	log.Println("Goodbye")
 }
 
-
+// runs the gRPC server that receives GoalStateV2
 func runServer(){
 
 	lis, err := net.Listen("tcp", ":50001")
@@ -75,21 +101,23 @@ func runServer(){
 	global_server = grpc.NewServer(opts ...)
 
 	global_server_api_instance := server.Goalstate_receiving_server{
-		Received_goalstatev2_count: 0,
+		Received_goalstatev2_count: &global_received_goalstate_count,
 	}
 
 	schema.RegisterGoalStateProvisionerServer(global_server, &global_server_api_instance)
-	fmt.Println("Now running a goalstate receiving server")
+	log.Printf("Now running a goalstate receiving server, current count: %d", global_received_goalstate_count)
+	log.Println("Now running a goalstate receiving server")
 	if err := global_server.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %s", err)
 	}
 
 }
 
+// runs the gRPC client that sends out on-demand requests
 func runClient(){
 	//number_of_calls := 200
 	var waitGroup = sync.WaitGroup{}
-	fmt.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
+	log.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
 	//time.Sleep(10 * time.Second)
 	var err error
 	global_client_connection, err = grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
@@ -99,16 +127,8 @@ func runClient(){
 	defer global_client_connection.Close()
 	c := schema.NewGoalStateProvisionerClient(global_client_connection)
 	begin := time.Now()
-	// try to use the same amount of workers (thread pool size) as the current ACA in test environment
-	//number_of_workers := 16
-	//jobs := make(chan *schema.HostRequest, number_of_calls)
-	//results := make(chan *schema.HostRequestReply, number_of_calls)
 
-	//for w:=0 ; w < number_of_workers ; w ++{
-	//	go worker(&waitGroup, &c, w, jobs, results)
-	//}
-
-	fmt.Println("Press the Enter Key to terminate the console screen!")
+	log.Println("Press the Enter Key to terminate the console screen!")
 	fmt.Scanln() // wait for Enter Key
 
 	request_id := 0
@@ -119,7 +139,6 @@ func runClient(){
 
 			go func(id int) {
 				defer waitGroup.Done()
-				//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
 				call_start := time.Now()
 				state_request := schema.HostRequest_ResourceStateRequest{
 					RequestType:     schema.RequestType_ON_DEMAND,
@@ -133,7 +152,6 @@ func runClient(){
 					Protocol:        schema.Protocol_ARP,
 				}
 				state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
-				//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
 
 				host_request := schema.HostRequest{
 					FormatVersion: rand.Uint32(),
@@ -146,7 +164,6 @@ func runClient(){
 				if err != nil {
 					log.Fatalf("Error when calling RequestGoalStates: %s", err)
 				}
-				time.Sleep(time.Millisecond * 30)
 				log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
 					id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
 					host_request_reply.OperationStatuses[0].RequestId)
@@ -158,7 +175,7 @@ func runClient(){
 		waitGroup.Wait()
 		end := time.Now()
 		diff := end.Sub(begin)
-		fmt.Println("Finishing ", number_of_calls, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
+		log.Println("Finishing ", number_of_calls, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
 
 	}else if test_mode_latency_or_throughput == throughput_mode{
 		log.Printf("Client running in throughput mode, it will send on-demand requests concurrently for %d seconds", client_call_length_in_seconds)
@@ -176,17 +193,11 @@ func runClient(){
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
 				log.Println("Time's up, stop the server")
 				global_client_connection.Close()
-				//test_stop_channel <- struct{}{}
-				//ctx.Done()
-				//(global_server_api_instance).Mu.Lock()
 				global_server.Stop()
-				//(global_server_api_instance).Mu.Unlock()
 				global_client_connection.Close()
-				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, 1)
 				break
 			}else{
 				go func(id int, ctx *context.Context) {
-					//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
 					call_start := time.Now()
 					state_request := schema.HostRequest_ResourceStateRequest{
 						RequestType:     schema.RequestType_ON_DEMAND,
@@ -200,13 +211,11 @@ func runClient(){
 						Protocol:        schema.Protocol_ARP,
 					}
 					state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
-					//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
 
 					host_request := schema.HostRequest{
 						FormatVersion: rand.Uint32(),
 						StateRequests: state_request_array,
 					}
-					//jobs <- &host_request
 					if global_client_connection.GetState() == connectivity.Idle ||
 						global_client_connection.GetState() == connectivity.Ready{
 						defer waitGroup.Done()
@@ -214,14 +223,13 @@ func runClient(){
 						send_request_time := time.Now()
 						select {
 						case <-(*ctx).Done():
-							return
+							break
 						default:
 							host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
 							received_reply_time := time.Now()
 							if err != nil {
-								waitGroup.Done()
 								log.Printf("Error when calling RequestGoalStates: %s\n", err)
-								return
+								break
 							}
 							//time.Sleep(time.Millisecond * 30)
 							log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
@@ -235,20 +243,20 @@ func runClient(){
 				// update now and update request ID
 				request_id ++
 			}
-			//now = time.Now()
 		}
 		log.Println("Outside of the for loop, now wait a little bit")
 		waitGroup.Wait()
 		end := time.Now()
 		diff := end.Sub(begin)
-		fmt.Println("Sent ", count, " RequestGoalStates calls in ", client_call_length_in_seconds ," seconds, took ",diff.Milliseconds(), " ms to receive the results")
+		log.Printf("Requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, global_received_goalstate_count)
+		log.Println("Sent ", request_id + 1, " RequestGoalStates calls in ", client_call_length_in_seconds ," seconds, took ",diff.Milliseconds(), " ms to receive the results")
 	}else{
 		log.Fatalf("Client got unknown test mode: %v, exiting...", test_mode_latency_or_throughput)
 	}
 
 	// commenting out this goalstate sending part in the client, as it should now be done by NCM.
 /*
-	fmt.Println("Time to call the same amount of PushGoalStates streaming calls")
+	log.Println("Time to call the same amount of PushGoalStates streaming calls")
 	stream, err := c.PushGoalStatesStream(context.Background())
 	waitc := make(chan struct{})
 	go func(){
@@ -256,13 +264,13 @@ func runClient(){
 			in, err := stream.Recv()
 			if err == io.EOF{
 				close(waitc)
-				fmt.Println("Returning because the stream received io.EOF")
+				log.Println("Returning because the stream received io.EOF")
 				return
 			}
 			if err != nil {
-				fmt.Printf("Failed to receive a goalstate programming result: %v\n", err)
+				log.Printf("Failed to receive a goalstate programming result: %v\n", err)
 			}
-			fmt.Printf("Received a goalstate operation reply for the %vth goalstatev2: %v\n", (*in).FormatVersion,(*in).MessageTotalOperationTime)
+			log.Printf("Received a goalstate operation reply for the %vth goalstatev2: %v\n", (*in).FormatVersion,(*in).MessageTotalOperationTime)
 		}
 	}()
 	for a:= 0 ; a < client_call_length_in_seconds ; a ++{
@@ -279,11 +287,11 @@ func runClient(){
 			GatewayStates:       nil,
 		}
 		if err:= stream.Send(&v2); err != nil{
-			fmt.Printf("Sending GoalStateV2: %v gave this error: %v\n", v2.FormatVersion, err)
+			log.Printf("Sending GoalStateV2: %v gave this error: %v\n", v2.FormatVersion, err)
 		}
-		fmt.Printf("Sent the %vth gsv2\n", a)
+		log.Printf("Sent the %vth gsv2\n", a)
 	}
-	fmt.Println("All gsv2 sent, closing the stream")
+	log.Println("All gsv2 sent, closing the stream")
 	time.Sleep(time.Second * 10)
 	stream.CloseSend()
 	<-waitc
