@@ -174,65 +174,67 @@ func runClient(){
 
 		for {
 			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
-				//test_stop_channel <- struct{}{}
-				ctx.Done()
-				(*global_server_api_instance).Mu.Lock()
-				global_server.GracefulStop()
-				(*global_server_api_instance).Mu.Unlock()
-				global_client_connection.Close()
 				log.Println("Time's up, stop the server")
-				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, &global_server_api_instance.Received_goalstatev2_count)
+				global_client_connection.Close()
+				//test_stop_channel <- struct{}{}
+				//ctx.Done()
+				//(global_server_api_instance).Mu.Lock()
+				global_server.Stop()
+				//(global_server_api_instance).Mu.Unlock()
+				global_client_connection.Close()
+				log.Printf("Time to stop sending requests, requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, 1)
 				break
-			}
+			}else{
+				go func(id int, ctx *context.Context) {
+					//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
+					call_start := time.Now()
+					state_request := schema.HostRequest_ResourceStateRequest{
+						RequestType:     schema.RequestType_ON_DEMAND,
+						RequestId:       strconv.Itoa(id),
+						TunnelId:        21,				// this should be changed when testing with more than 1 VPCs
+						SourceIp:        "10.0.0.3",		// this should be changed when so that we can test different src IPs
+						SourcePort:      1,
+						DestinationIp:   "10.0.2.2",		// this should be changed when so that we can test different dest IPs
+						DestinationPort: 1,
+						Ethertype:       schema.EtherType_IPV4,
+						Protocol:        schema.Protocol_ARP,
+					}
+					state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
+					//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
 
-			go func(id int, ctx *context.Context) {
-				defer waitGroup.Done()
-				//fmt.Println(fmt.Sprintf("Preparing the %v th request", id))
-				call_start := time.Now()
-				state_request := schema.HostRequest_ResourceStateRequest{
-					RequestType:     schema.RequestType_ON_DEMAND,
-					RequestId:       strconv.Itoa(id),
-					TunnelId:        21,				// this should be changed when testing with more than 1 VPCs
-					SourceIp:        "10.0.0.3",		// this should be changed when so that we can test different src IPs
-					SourcePort:      1,
-					DestinationIp:   "10.0.2.2",		// this should be changed when so that we can test different dest IPs
-					DestinationPort: 1,
-					Ethertype:       schema.EtherType_IPV4,
-					Protocol:        schema.Protocol_ARP,
-				}
-				state_request_array := []*schema.HostRequest_ResourceStateRequest{&state_request}
-				//fmt.Println(fmt.Sprintf("Sending the %v th request", id))
-
-				host_request := schema.HostRequest{
-					FormatVersion: rand.Uint32(),
-					StateRequests: state_request_array,
-				}
-				//jobs <- &host_request
-				if global_client_connection.GetState() == connectivity.Idle ||
-					global_client_connection.GetState() == connectivity.Ready{
-					waitGroup.Add(1)
-					send_request_time := time.Now()
-					select {
+					host_request := schema.HostRequest{
+						FormatVersion: rand.Uint32(),
+						StateRequests: state_request_array,
+					}
+					//jobs <- &host_request
+					if global_client_connection.GetState() == connectivity.Idle ||
+						global_client_connection.GetState() == connectivity.Ready{
+						defer waitGroup.Done()
+						waitGroup.Add(1)
+						send_request_time := time.Now()
+						select {
 						case <-(*ctx).Done():
 							return
-					default:
-						host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
-						received_reply_time := time.Now()
-						if err != nil {
-							log.Printf("Error when calling RequestGoalStates: %s\n", err)
-							return
-						}
-						//time.Sleep(time.Millisecond * 30)
-						log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
-							id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
-							host_request_reply.OperationStatuses[0].RequestId)
-						count ++}
+						default:
+							host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
+							received_reply_time := time.Now()
+							if err != nil {
+								waitGroup.Done()
+								log.Printf("Error when calling RequestGoalStates: %s\n", err)
+								return
+							}
+							//time.Sleep(time.Millisecond * 30)
+							log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+								id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+								host_request_reply.OperationStatuses[0].RequestId)
+							count ++}
 
-				}
+					}
 
-			}(request_id, &ctx)
-			// update now and update request ID
-			request_id ++
+				}(request_id, &ctx)
+				// update now and update request ID
+				request_id ++
+			}
 			//now = time.Now()
 		}
 		log.Println("Outside of the for loop, now wait a little bit")
