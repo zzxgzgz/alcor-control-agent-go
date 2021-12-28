@@ -6,14 +6,15 @@ import (
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
 	"github.com/zzxgzgz/alcor-control-agent-go/server"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
+	//"google.golang.org/grpc/connectivity"
 	"log"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
 	"sync"
-	"time"
+	system_time "time"
+	"golang.org/x/time/rate"
 )
 
 var aca_server_port string
@@ -26,9 +27,11 @@ var number_of_calls = 0
 var client_call_length_in_seconds int = 1
 var global_server *grpc.Server
 var global_server_api_instance *server.Goalstate_receiving_server
-var global_client_connection *grpc.ClientConn
+//var global_client_connection *grpc.ClientConn
 var global_received_goalstate_count int = 0
-
+var global_sent_on_demand_request_limit_per_second int = 0
+var global_number_of_clients int = 0
+var global_number_of_connections int = 0
 
 /*
 Arguments:
@@ -40,18 +43,21 @@ The throughput_mode, which sends as many requests as possible in a time interval
 and the latency_mode, which sends a fixed number of requests, and see how much time it takes, is 1.
 5.1. client_call_length_in_seconds, used with the throughput_mode, indicates the time interval(in seconds) of the test.
 5.2. number_of_calls, used with the latency_mode, indicates how many requests the gRPC client will send.
+6. global_sent_on_demand_request_limit_per_second, used to limit how many request the program can send per second.
+7. global_number_of_clients, indicates how many gRPC clients this program creates.
+8. global_number_of_connections, indicates how many gRPC connections this program creates.
 
 Examples:
-1) Run the throughput test for 10 seconds:
+1) Run the throughput test for 10 seconds, limits send requests to 100 per second, create 20 clients and 30 connections:
 ```
 go build cmd/main.go
-./main 50001 ${ncm_ip} ${ncm_gRPC_port} 2 10
+./main 50001 ${ncm_ip} ${ncm_gRPC_port} 2 10 100 20 30
 ```
 
-2) Run the latency test with 1000 on-demand requests:
+2) Run the latency test with 1000 on-demand requests, limits send requests to 100 per second, create 20 clients and 30 connections:
 ```
 go build cmd/main.go
-./main 50001 ${ncm_ip} ${ncm_gRPC_port} 1 1000
+./main 50001 ${ncm_ip} ${ncm_gRPC_port} 1 1000 100 20 30
 ```
 */
 func main() {
@@ -75,7 +81,13 @@ func main() {
 		log.Fatalf("Client got unknown test mode: %v, exiting...", test_mode_latency_or_throughput)
 	}
 
-	log.Printf("Running gRPC server at localhost:%s, gRPC client connecting to server at: %s:%s, the test will last %d seconds\n", aca_server_port, ncm_ip, ncm_gRPC_port, client_call_length_in_seconds)
+	global_sent_on_demand_request_limit_per_second, _  = strconv.Atoi(args_without_program_name[5])
+
+	global_number_of_clients, _ = strconv.Atoi(args_without_program_name[6])
+
+	global_number_of_connections, _ = strconv.Atoi(args_without_program_name[7])
+
+	log.Printf("Running gRPC server at localhost:%s, gRPC client connecting to server at: %s:%s, the test will last %d seconds, the send limit is %d request/second\n", aca_server_port, ncm_ip, ncm_gRPC_port, client_call_length_in_seconds, global_sent_on_demand_request_limit_per_second)
 
 	go runServer()
 
@@ -115,18 +127,32 @@ func runServer(){
 
 // runs the gRPC client that sends out on-demand requests
 func runClient(){
+	limit := rate.NewLimiter(rate.Limit(global_sent_on_demand_request_limit_per_second), 1)
 	//number_of_calls := 200
 	var waitGroup = sync.WaitGroup{}
 	log.Println("Running client and trying to connect to server at ", ncm_ip+":"+ncm_gRPC_port)
 	//time.Sleep(10 * time.Second)
-	var err error
-	global_client_connection, err = grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
-	if err != nil {
-		log.Fatalf("did not connect: %s", err)
+
+	client_connections := make([]*grpc.ClientConn, global_number_of_connections)
+
+	for i := 0 ; i < global_number_of_connections ; i ++ {
+		client_connection, err := grpc.Dial(ncm_ip + ":" + ncm_gRPC_port, grpc.WithInsecure())
+		defer client_connection.Close()
+
+		if err != nil {
+			log.Fatalf("The %dth connection did not connect: %s\n", i, err)
+		}
+		client_connections = append(client_connections, client_connection)
 	}
-	defer global_client_connection.Close()
-	c := schema.NewGoalStateProvisionerClient(global_client_connection)
-	begin := time.Now()
+
+	clients := make([]schema.GoalStateProvisionerClient, global_number_of_clients)
+
+	for i := 0 ; i < global_number_of_clients ; i ++ {
+		client := schema.NewGoalStateProvisionerClient(client_connections[i%global_number_of_connections])
+		clients = append(clients, client)
+	}
+
+	begin := system_time.Now()
 
 	log.Println("Press the Enter Key to terminate the console screen!")
 	fmt.Scanln() // wait for Enter Key
@@ -139,7 +165,8 @@ func runClient(){
 
 			go func(id int) {
 				defer waitGroup.Done()
-				call_start := time.Now()
+				limit.Wait(context.Background())
+				call_start := system_time.Now()
 				state_request := schema.HostRequest_ResourceStateRequest{
 					RequestType:     schema.RequestType_ON_DEMAND,
 					RequestId:       strconv.Itoa(id),
@@ -158,9 +185,9 @@ func runClient(){
 					StateRequests: state_request_array,
 				}
 				//jobs <- &host_request
-				send_request_time := time.Now()
-				host_request_reply, err := c.RequestGoalStates(context.Background(), &host_request)
-				received_reply_time := time.Now()
+				send_request_time := system_time.Now()
+				host_request_reply, err := clients[(global_number_of_clients % id)].RequestGoalStates(context.Background(), &host_request)
+				received_reply_time := system_time.Now()
 				if err != nil {
 					log.Fatalf("Error when calling RequestGoalStates: %s", err)
 				}
@@ -173,14 +200,14 @@ func runClient(){
 			//now = time.Now()
 		}
 		waitGroup.Wait()
-		end := time.Now()
+		end := system_time.Now()
 		diff := end.Sub(begin)
 		log.Println("Finishing ", number_of_calls, " RequestGoalStates calls took ",diff.Milliseconds(), " ms")
 
 	}else if test_mode_latency_or_throughput == throughput_mode{
 		log.Printf("Client running in throughput mode, it will send on-demand requests concurrently for %d seconds", client_call_length_in_seconds)
-		through_put_test_start_time := time.Now()
-		through_put_test_end_time := through_put_test_start_time.Add(time.Duration(client_call_length_in_seconds) * time.Second )
+		through_put_test_start_time := system_time.Now()
+		through_put_test_end_time := through_put_test_start_time.Add(system_time.Duration(client_call_length_in_seconds) * system_time.Second )
 		//test_stop_channel := make(chan struct{})
 		request_id := 0
 		count := 0
@@ -190,15 +217,17 @@ func runClient(){
 		defer cancel()
 
 		for {
-			if through_put_test_end_time.Sub(time.Now()).Milliseconds() <= 0 {
+			if through_put_test_end_time.Sub(system_time.Now()).Milliseconds() <= 0 {
 				log.Println("Time's up, stop the server")
-				global_client_connection.Close()
+				for _, connection := range client_connections {
+					connection.Close()
+				}
 				global_server.Stop()
-				global_client_connection.Close()
 				break
 			}else{
 				go func(id int, ctx *context.Context) {
-					call_start := time.Now()
+					//connection_to_use := client_connections[global_number_of_connections % id]
+					call_start := system_time.Now()
 					state_request := schema.HostRequest_ResourceStateRequest{
 						RequestType:     schema.RequestType_ON_DEMAND,
 						RequestId:       strconv.Itoa(id),
@@ -216,28 +245,29 @@ func runClient(){
 						FormatVersion: rand.Uint32(),
 						StateRequests: state_request_array,
 					}
-					if global_client_connection.GetState() == connectivity.Idle ||
-						global_client_connection.GetState() == connectivity.Ready{
-						defer waitGroup.Done()
-						waitGroup.Add(1)
-						send_request_time := time.Now()
-						select {
-						case <-(*ctx).Done():
+					//if connection_to_use.GetState() == connectivity.Idle ||
+					//	connection_to_use.GetState() == connectivity.Ready{
+					limit.Wait(*ctx)
+					defer waitGroup.Done()
+					waitGroup.Add(1)
+					send_request_time := system_time.Now()
+					select {
+					case <-(*ctx).Done():
+						break
+					default:
+						host_request_reply, err := clients[id % global_number_of_clients].RequestGoalStates(*ctx, &host_request)
+						received_reply_time := system_time.Now()
+						if err != nil {
+							log.Printf("Error when calling RequestGoalStates: %s\n", err)
 							break
-						default:
-							host_request_reply, err := c.RequestGoalStates(*ctx, &host_request)
-							received_reply_time := time.Now()
-							if err != nil {
-								log.Printf("Error when calling RequestGoalStates: %s\n", err)
-								break
-							}
-							//time.Sleep(time.Millisecond * 30)
-							log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
-								id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
-								host_request_reply.OperationStatuses[0].RequestId)
-							count ++}
+						}
+						//time.Sleep(time.Millisecond * 30)
+						log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+							id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+							host_request_reply.OperationStatuses[0].RequestId)
+						count ++}
 
-					}
+					//}
 
 				}(request_id, &ctx)
 				// update now and update request ID
@@ -246,7 +276,7 @@ func runClient(){
 		}
 		log.Println("Outside of the for loop, now wait a little bit")
 		waitGroup.Wait()
-		end := time.Now()
+		end := system_time.Now()
 		diff := end.Sub(begin)
 		log.Printf("Requests sent: %d, request finished: %d, received GoalStateV2 amount: %d\n", request_id +1, count, global_received_goalstate_count)
 		log.Println("Sent ", request_id + 1, " RequestGoalStates calls in ", client_call_length_in_seconds ," seconds, took ",diff.Milliseconds(), " ms to receive the results")
