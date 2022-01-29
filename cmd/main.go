@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/zzxgzgz/alcor-control-agent-go/api/schema"
+	"math"
+
 	//"github.com/zzxgzgz/alcor-control-agent-go/client"
 	"github.com/zzxgzgz/alcor-control-agent-go/server"
 	"golang.org/x/time/rate"
@@ -33,6 +35,11 @@ var global_received_goalstate_count int = 0
 var global_sent_on_demand_request_limit_per_second int = 0
 var global_number_of_clients int = 0
 var global_number_of_connections int = 0
+// key is tunnel ID, values are IPs
+var global_port_ips map[int][]string = make(map[int][]string, 0)
+var global_neighbor_ips map[int][]string = make(map[int][]string, 0)
+var global_keep_storing_ports_and_neighbors bool = true
+var global_tunnel_ids = make([]int, 0)
 
 /*
 Arguments:
@@ -112,12 +119,20 @@ func runServer(){
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	var opts []grpc.ServerOption
+	opts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(math.MaxInt32),
+		grpc.MaxSendMsgSize(math.MaxInt32),
+	}
 
 	global_server = grpc.NewServer(opts ...)
 
 	global_server_api_instance := server.Goalstate_receiving_server{
 		Received_goalstatev2_count: &global_received_goalstate_count,
+		Neighbors: &global_neighbor_ips,
+		Ports: &global_port_ips,
+		Keep_storing_ports_and_neighbors: &global_keep_storing_ports_and_neighbors,
+		Mu: sync.Mutex{},
+		Tunnel_Ids: &global_tunnel_ids,
 	}
 
 	schema.RegisterGoalStateProvisionerServer(global_server, &global_server_api_instance)
@@ -166,7 +181,7 @@ func runClient(){
 
 	log.Println("Press the Enter Key to start the test!")
 	fmt.Scanln() // wait for Enter Key
-
+	global_keep_storing_ports_and_neighbors = false
 	if test_mode_latency_or_throughput == latency_mode{
 		request_id := 0
 		log.Printf("Client running in latency mode, it will send %d on-demand requests concurrently\n", number_of_calls)
@@ -244,14 +259,18 @@ func runClient(){
 					//log.Printf("Client is null? %v", client_is_nil)
 					go func(id int, ctx *context.Context, client_ptr *schema.GoalStateProvisionerClient) {
 						//connection_to_use := client_connections[global_number_of_connections % id]
-						call_start := system_time.Now()
+
+						tunnel_id_to_use := global_tunnel_ids[id % (len(global_tunnel_ids) - 1)]
+						source_ip := global_port_ips[tunnel_id_to_use][(id / len(global_port_ips[tunnel_id_to_use])) % len(global_port_ips[tunnel_id_to_use])]
+						destination_ip := global_neighbor_ips[tunnel_id_to_use][id % len(global_neighbor_ips[tunnel_id_to_use])]
+						//call_start := system_time.Now()
 						state_request := schema.HostRequest_ResourceStateRequest{
 							RequestType:     schema.RequestType_ON_DEMAND,
 							RequestId:       strconv.Itoa(id),
 							TunnelId:        21,				// this should be changed when testing with more than 1 VPCs
-							SourceIp:        "10.0.0.3",		// this should be changed when so that we can test different src IPs
+							SourceIp:        source_ip,		// this should be changed when so that we can test different src IPs
 							SourcePort:      1,
-							DestinationIp:   "10.0.2.2",		// this should be changed when so that we can test different dest IPs
+							DestinationIp:   destination_ip,		// this should be changed when so that we can test different dest IPs
 							DestinationPort: 1,
 							Ethertype:       schema.EtherType_IPV4,
 							Protocol:        schema.Protocol_ARP,
@@ -266,24 +285,23 @@ func runClient(){
 						//	connection_to_use.GetState() == connectivity.Ready{
 						defer waitGroup.Done()
 						waitGroup.Add(1)
-						send_request_time := system_time.Now()
+						//send_request_time := system_time.Now()
 						select {
 						case <-(*ctx).Done():
 							break
 						default:
-							host_request_reply, err := (*client_ptr).RequestGoalStates(*ctx, &host_request)
-							received_reply_time := system_time.Now()
+							/*host_request_reply*/_, err := (*client_ptr).RequestGoalStates(*ctx, &host_request)
+							//received_reply_time := system_time.Now()
 							if err != nil {
 								//log.Printf("Error when calling RequestGoalStates: %s\n", err)
 								return
 							}
 							//time.Sleep(time.Millisecond * 30)
-							log.Printf("For the %dth request, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
-								id, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
-								host_request_reply.OperationStatuses[0].RequestId)
-							count ++}
-
-						//}
+							//log.Printf("For the %dth request, tunnel ID: %d, src: %s, dest: %s, total time took %d ms,\ngRPC call time took %d ms\nResponse from server: %v\n",
+							//	id, tunnel_id_to_use, source_ip, destination_ip, received_reply_time.Sub(call_start).Milliseconds(), received_reply_time.Sub(send_request_time).Milliseconds(),
+							//	host_request_reply.OperationStatuses[0].RequestId)
+							count ++
+						}
 
 					}(request_id, &ctx, current_client)
 					// update now and update request ID

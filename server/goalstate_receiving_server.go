@@ -10,7 +10,11 @@ import (
 
 type Goalstate_receiving_server struct {
 	Received_goalstatev2_count *int
+	Neighbors *map[int][]string
+	Ports *map[int][]string
+	Keep_storing_ports_and_neighbors *bool
 	Mu sync.Mutex
+	Tunnel_Ids *[]int
 }
 
 func (s *Goalstate_receiving_server) PushNetworkResourceStates(ctx context.Context, goalState *schema.GoalState) (*schema.GoalStateOperationReply, error){
@@ -36,9 +40,38 @@ func (s *Goalstate_receiving_server) PushGoalStatesStream(stream_server schema.G
 		if gsv2_ptr != nil {
 			s.Mu.Lock()
 			*(s.Received_goalstatev2_count) = *(s.Received_goalstatev2_count) + 1
+			if *(s.Keep_storing_ports_and_neighbors) {
+				// store the port IPs
+				for _, port_state_ptr := range gsv2_ptr.PortStates {
+					port_vpc_id := port_state_ptr.Configuration.VpcId
+
+					port_tunnel_id := (*(gsv2_ptr.VpcStates)[port_vpc_id]).Configuration.TunnelId
+					(*s.Tunnel_Ids) = append((*s.Tunnel_Ids), int(port_tunnel_id))
+					(*s.Ports)[int(port_tunnel_id)] = append((*s.Ports)[int(port_tunnel_id)], (port_state_ptr.Configuration.FixedIps)[0].GetIpAddress())
+				}
+				// store the neighbor IPs
+				for _, neighbor_state_ptr := range gsv2_ptr.NeighborStates {
+					neighbor_vpc_id := neighbor_state_ptr.Configuration.VpcId
+
+					neighbor_tunnel_id := (*(gsv2_ptr.VpcStates)[neighbor_vpc_id]).Configuration.TunnelId
+					(*s.Tunnel_Ids) = append((*s.Tunnel_Ids), int(neighbor_tunnel_id))
+					(*s.Neighbors)[int(neighbor_tunnel_id)] = append((*s.Neighbors)[int(neighbor_tunnel_id)], (neighbor_state_ptr.Configuration.FixedIps)[0].GetIpAddress())
+
+					//*(s.Neighbors) = append(*(s.Neighbors), (neighbor_state_ptr.Configuration.FixedIps)[0].GetIpAddress())
+				}
+				log.Println("After storing GSV2, let's see what we have locally:")
+
+				for tunnel_id := range *s.Ports {
+					log.Println("For tunnel ID: ", tunnel_id, ", we have ", len((*s.Ports)[tunnel_id]), " ports")
+				}
+
+				for tunnel_id := range *s.Neighbors {
+					log.Println("For tunnel ID: ", tunnel_id, ", we have ", len((*s.Neighbors)[tunnel_id]), " neighbors")
+				}
+			}
 			s.Mu.Unlock()
-			log.Println("Called PushGoalStatesStream for the ", *(s.Received_goalstatev2_count), " time")
-			log.Println("Read a gsv2 from the stream")
+			//log.Println("Called PushGoalStatesStream for the ", *(s.Received_goalstatev2_count), " time")
+			//log.Println("Read a gsv2 from the stream")
 			// use this following go routine to simulate using another thread to program goalstatev2, and reply
 			//go func() {
 			reply := schema.GoalStateOperationReply{
